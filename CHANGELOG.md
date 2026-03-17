@@ -1,0 +1,42 @@
+# Changelog
+
+## [v0.0.11](https://github.com/suthio/redash-mcp/compare/v0.0.10...v0.0.11) - 2026-03-09
+- Add SOCKS proxy support by @suthio in https://github.com/suthio/redash-mcp/pull/34
+- fix: use z.coerce.number() to handle string-typed numeric params from MCP clients by @strotgen in https://github.com/suthio/redash-mcp/pull/35
+
+## [v0.0.10](https://github.com/suthio/redash-mcp/compare/v0.0.9...v0.0.10) - 2026-03-05
+- Fix API key leakage in error logs (fixes #1) by @deemoowoor in https://github.com/suthio/redash-mcp/pull/32
+
+## [v0.0.9](https://github.com/suthio/redash-mcp/compare/v0.0.8...v0.0.9) - 2026-02-07
+- Add Dashboard, Alert, Widget, Query Snippet APIs by @dtaniwaki in https://github.com/suthio/redash-mcp/pull/27
+
+## [v0.0.8](https://github.com/suthio/redash-mcp/compare/v0.0.7...v0.0.8) - 2026-01-13
+- Add tests by @dtaniwaki in https://github.com/suthio/redash-mcp/pull/25
+
+## [v0.0.7](https://github.com/suthio/redash-mcp/compare/v0.0.6...v0.0.7) - 2026-01-07
+- Support custom HTTP headers via REDASH_EXTRA_HEADERS by @suthio in https://github.com/suthio/redash-mcp/pull/23
+
+## [v0.0.6](https://github.com/suthio/redash-mcp/compare/v0.0.5...v0.0.6) - 2025-11-26
+- feat: Add CSV export support for query results by @suthio in https://github.com/suthio/redash-mcp/pull/20
+
+## [v0.0.5](https://github.com/suthio/redash-mcp/compare/v0.0.4...v0.0.5) - 2025-11-05
+- Add get_schema tool by @winebarrel in https://github.com/suthio/redash-mcp/pull/19
+
+## [v0.0.4](https://github.com/suthio/redash-mcp/commits/v0.0.4) - 2025-08-16
+- add MCP server badge by @punkpeye in https://github.com/suthio/redash-mcp/pull/1
+- Update naming convention from kebab-case to snake_case by @suthio in https://github.com/suthio/redash-mcp/pull/3
+- (feat) add search to the `list_queries` tool by @wncm in https://github.com/suthio/redash-mcp/pull/4
+- Fix: Expose error details from executeQuery and pollQueryResults (#7) by @suthio in https://github.com/suthio/redash-mcp/pull/8
+- feat: Add execute_adhoc_query tool for temporary query execution by @tera911 in https://github.com/suthio/redash-mcp/pull/9
+- feat: Add tagpr for automated version management and npm publishing by @suthio in https://github.com/suthio/redash-mcp/pull/10
+- Add Visualization Management Tools by @tera911 in https://github.com/suthio/redash-mcp/pull/11
+- Release for v0.0.4 by @github-actions[bot] in https://github.com/suthio/redash-mcp/pull/13
+
+## [v0.0.4](https://github.com/suthio/redash-mcp/commits/v0.0.4) - 2025-08-16
+- add MCP server badge by @punkpeye in https://github.com/suthio/redash-mcp/pull/1
+- Update naming convention from kebab-case to snake_case by @suthio in https://github.com/suthio/redash-mcp/pull/3
+- (feat) add search to the `list_queries` tool by @wncm in https://github.com/suthio/redash-mcp/pull/4
+- Fix: Expose error details from executeQuery and pollQueryResults (#7) by @suthio in https://github.com/suthio/redash-mcp/pull/8
+- feat: Add execute_adhoc_query tool for temporary query execution by @tera911 in https://github.com/suthio/redash-mcp/pull/9
+- feat: Add tagpr for automated version management and npm publishing by @suthio in https://github.com/suthio/redash-mcp/pull/10
+- Add Visualization Management Tools by @tera911 in https://github.com/suthio/redash-mcp/pull/11

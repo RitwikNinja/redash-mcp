@@ -1,0 +1,26 @@
+# Build Stage
+FROM node:18-slim AS builder
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy source and build (compiles TS to JS)
+COPY . .
+RUN npm run build
+
+# Production Stage
+FROM node:18-slim
+WORKDIR /app
+
+# Copy production essentials
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+
+# Railway injects the PORT automatically
+EXPOSE 3000
+
+# Start the server using the compiled JS
+CMD ["node", "dist/index.js"]
