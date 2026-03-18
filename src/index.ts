@@ -189,29 +189,27 @@ server.tool("get_destinations", {}, () =>
 const app = express();
 app.use(express.json());
 
-// Simplified transport tracking
-let latestTransport: SSEServerTransport | null = null;
+// Registry to track multiple active transports by session ID
+const transportRegistry = new Map<string, SSEServerTransport>();
 
 /**
  * The GET endpoint Cursor connects to via EventSource
  */
 app.get("/sse", async (req: Request, res: Response) => {
-  console.log("New SSE connection attempt");
+  const sessionId = Math.random().toString(36).substring(7);
+  console.log(`Establishing SSE session: ${sessionId}`);
 
-  // ❗ FIXED: Removed manual res.writeHead. 
-  // SSEServerTransport.start() (called via server.connect) handles headers internally.
-  const transport = new SSEServerTransport("/messages", res);
-  latestTransport = transport;
+  // The endpoint URL must include the sessionId so POSTs can be routed back
+  const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
+  transportRegistry.set(sessionId, transport);
 
   server.connect(transport).catch((error) => {
-    console.error("MCP Connection error:", error);
+    console.error(`MCP Connection error [${sessionId}]:`, error);
   });
 
   req.on("close", () => {
-    console.log("SSE connection closed");
-    if (latestTransport === transport) {
-      latestTransport = null;
-    }
+    console.log(`SSE session closed: ${sessionId}`);
+    transportRegistry.delete(sessionId);
   });
 });
 
@@ -219,18 +217,25 @@ app.get("/sse", async (req: Request, res: Response) => {
  * The POST endpoint where Cursor sends tool requests
  */
 app.post("/messages", async (req: Request, res: Response) => {
-  if (latestTransport) {
+  const sessionId = req.query.sessionId as string;
+  
+  // Try to find the specific transport for this session
+  // Fallback to the most recent one if no ID is provided (some older clients)
+  const transport = sessionId 
+    ? transportRegistry.get(sessionId) 
+    : Array.from(transportRegistry.values()).pop();
+
+  if (transport) {
     try {
-      await latestTransport.handlePostMessage(req, res);
+      await transport.handlePostMessage(req, res);
     } catch (err: any) {
-      console.error("Error handling post message:", err);
-      // Ensure we don't try to send headers twice here either
+      console.error(`Error handling message for session ${sessionId}:`, err);
       if (!res.headersSent) {
-        res.status(500).send(err.message);
+        res.status(500).send("Internal Server Error");
       }
     }
   } else {
-    console.error("POST to /messages failed: No active SSE transport");
+    console.warn(`Message received for unknown session: ${sessionId}`);
     res.status(400).send("No active SSE session found.");
   }
 });
