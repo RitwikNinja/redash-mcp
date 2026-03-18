@@ -30,29 +30,38 @@ if (!process.env.REDASH_API_KEY) {
   process.exit(1);
 }
 
-// Create MCP server instance
+// Create modern MCP server instance
 const server = new McpServer({
   name: "redash-mcp",
   version: "1.1.0",
 });
 
-// Helper for tool execution response formatting
-const formatResponse = (data: any) => ({
-  content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-});
+/**
+ * Standardized response wrapper to maintain the original async logic flow
+ */
+const wrapTool = async (logic: Promise<any>) => {
+  try {
+    const result = await logic;
+    // If original logic already returns formatted content, use it, otherwise stringify
+    return result.content ? result : { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  } catch (error) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+};
 
-const formatError = (error: any, context: string) => ({
-  isError: true,
-  content: [{ type: "text" as const, text: `${context}: ${error instanceof Error ? error.message : String(error)}` }],
-});
+// ----- 1. QUERY TOOLS -----
 
-// ----- TOOLS REGISTRATION -----
+server.tool("get_query", { queryId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getQuery(args.queryId)));
 
-// Query Tools
-server.tool("get_query", { queryId: z.coerce.number() }, async ({ queryId }) => {
-  try { return formatResponse(await redashClient.getQuery(queryId)); }
-  catch (e) { return formatError(e, `Error getting query ${queryId}`); }
-});
+server.tool("list_queries", {
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25),
+  q: z.string().optional()
+}, async (args) => wrapTool(redashClient.getQueries(args.page, args.pageSize, args.q)));
 
 server.tool("create_query", {
   name: z.string(),
@@ -62,10 +71,7 @@ server.tool("create_query", {
   options: z.any().optional(),
   schedule: z.any().optional(),
   tags: z.array(z.string()).optional()
-}, async (params) => {
-  try { return formatResponse(await redashClient.createQuery(params as CreateQueryRequest)); }
-  catch (e) { return formatError(e, "Error creating query"); }
-});
+}, async (args) => wrapTool(redashClient.createQuery(args as CreateQueryRequest)));
 
 server.tool("update_query", {
   queryId: z.coerce.number(),
@@ -78,64 +84,67 @@ server.tool("update_query", {
   tags: z.array(z.string()).optional(),
   is_archived: z.boolean().optional(),
   is_draft: z.boolean().optional()
-}, async ({ queryId, ...updateData }) => {
-  try { return formatResponse(await redashClient.updateQuery(queryId, updateData as UpdateQueryRequest)); }
-  catch (e) { return formatError(e, `Error updating query ${queryId}`); }
-});
+}, async ({ queryId, ...updateData }) => wrapTool(redashClient.updateQuery(queryId, updateData as UpdateQueryRequest)));
 
-server.tool("archive_query", { queryId: z.coerce.number() }, async ({ queryId }) => {
-  try { return formatResponse(await redashClient.archiveQuery(queryId)); }
-  catch (e) { return formatError(e, `Error archiving query ${queryId}`); }
-});
-
-server.tool("list_data_sources", {}, async () => {
-  try { return formatResponse(await redashClient.getDataSources()); }
-  catch (e) { return formatError(e, "Error listing data sources"); }
-});
-
-server.tool("list_queries", {
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25),
-  q: z.string().optional()
-}, async ({ page, pageSize, q }) => {
-  try { return formatResponse(await redashClient.getQueries(page, pageSize, q)); }
-  catch (e) { return formatError(e, "Error listing queries"); }
-});
+server.tool("archive_query", { queryId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.archiveQuery(args.queryId)));
 
 server.tool("execute_query", {
   queryId: z.coerce.number(),
   parameters: z.record(z.any()).optional()
-}, async ({ queryId, parameters }) => {
-  try { return formatResponse(await redashClient.executeQuery(queryId, parameters)); }
-  catch (e) { return formatError(e, `Error executing query ${queryId}`); }
-});
+}, async (args) => wrapTool(redashClient.executeQuery(args.queryId, args.parameters)));
+
+server.tool("execute_adhoc_query", {
+  query: z.string(),
+  dataSourceId: z.coerce.number()
+}, async (args) => wrapTool(redashClient.executeAdhocQuery(args.query, args.dataSourceId)));
 
 server.tool("get_query_results_csv", {
   queryId: z.coerce.number(),
   refresh: z.boolean().optional().default(false)
-}, async ({ queryId, refresh }) => {
-  try { return { content: [{ type: "text", text: await redashClient.getQueryResultsAsCsv(queryId, refresh) }] }; }
-  catch (e) { return formatError(e, `Error getting CSV for query ${queryId}`); }
+}, async (args) => {
+  const csv = await redashClient.getQueryResultsAsCsv(args.queryId, args.refresh);
+  return { content: [{ type: "text", text: csv }] };
 });
 
-// Dashboard Tools
+server.tool("fork_query", { queryId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.forkQuery(args.queryId)));
+
+server.tool("get_my_queries", { 
+  page: z.coerce.number().optional().default(1), 
+  pageSize: z.coerce.number().optional().default(25) 
+}, async (args) => wrapTool(redashClient.getMyQueries(args.page, args.pageSize)));
+
+server.tool("get_recent_queries", { 
+  page: z.coerce.number().optional().default(1), 
+  pageSize: z.coerce.number().optional().default(25) 
+}, async (args) => wrapTool(redashClient.getRecentQueries(args.page, args.pageSize)));
+
+server.tool("get_favorite_queries", { 
+  page: z.coerce.number().optional().default(1), 
+  pageSize: z.coerce.number().optional().default(25) 
+}, async (args) => wrapTool(redashClient.getFavoriteQueries(args.page, args.pageSize)));
+
+server.tool("add_query_favorite", { queryId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.addQueryFavorite(args.queryId)));
+
+server.tool("remove_query_favorite", { queryId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.removeQueryFavorite(args.queryId)));
+
+server.tool("get_query_tags", {}, async () => wrapTool(redashClient.getQueryTags()));
+
+// ----- 2. DASHBOARD TOOLS -----
+
 server.tool("list_dashboards", {
   page: z.coerce.number().optional().default(1),
   pageSize: z.coerce.number().optional().default(25)
-}, async ({ page, pageSize }) => {
-  try { return formatResponse(await redashClient.getDashboards(page, pageSize)); }
-  catch (e) { return formatError(e, "Error listing dashboards"); }
-});
+}, async (args) => wrapTool(redashClient.getDashboards(args.page, args.pageSize)));
 
-server.tool("get_dashboard", { dashboardId: z.coerce.number() }, async ({ dashboardId }) => {
-  try { return formatResponse(await redashClient.getDashboard(dashboardId)); }
-  catch (e) { return formatError(e, `Error getting dashboard ${dashboardId}`); }
-});
+server.tool("get_dashboard", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getDashboard(args.dashboardId)));
 
-server.tool("create_dashboard", { name: z.string(), tags: z.array(z.string()).optional() }, async (params) => {
-  try { return formatResponse(await redashClient.createDashboard(params as CreateDashboardRequest)); }
-  catch (e) { return formatError(e, "Error creating dashboard"); }
-});
+server.tool("create_dashboard", { name: z.string(), tags: z.array(z.string()).optional() }, 
+  async (args) => wrapTool(redashClient.createDashboard(args as CreateDashboardRequest)));
 
 server.tool("update_dashboard", {
   dashboardId: z.coerce.number(),
@@ -144,42 +153,50 @@ server.tool("update_dashboard", {
   is_archived: z.boolean().optional(),
   is_draft: z.boolean().optional(),
   dashboard_filters_enabled: z.boolean().optional()
-}, async ({ dashboardId, ...updateData }) => {
-  try { return formatResponse(await redashClient.updateDashboard(dashboardId, updateData as UpdateDashboardRequest)); }
-  catch (e) { return formatError(e, `Error updating dashboard ${dashboardId}`); }
-});
+}, async ({ dashboardId, ...data }) => wrapTool(redashClient.updateDashboard(dashboardId, data as UpdateDashboardRequest)));
 
-server.tool("archive_dashboard", { dashboardId: z.coerce.number() }, async ({ dashboardId }) => {
-  try { return formatResponse(await redashClient.archiveDashboard(dashboardId)); }
-  catch (e) { return formatError(e, `Error archiving dashboard ${dashboardId}`); }
-});
+server.tool("archive_dashboard", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.archiveDashboard(args.dashboardId)));
 
-server.tool("fork_dashboard", { dashboardId: z.coerce.number() }, async ({ dashboardId }) => {
-  try { return formatResponse(await redashClient.forkDashboard(dashboardId)); }
-  catch (e) { return formatError(e, `Error forking dashboard ${dashboardId}`); }
-});
+server.tool("fork_dashboard", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.forkDashboard(args.dashboardId)));
 
-server.tool("share_dashboard", { dashboardId: z.coerce.number() }, async ({ dashboardId }) => {
-  try { return formatResponse(await redashClient.shareDashboard(dashboardId)); }
-  catch (e) { return formatError(e, `Error sharing dashboard ${dashboardId}`); }
-});
+server.tool("share_dashboard", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.shareDashboard(args.dashboardId)));
 
-server.tool("unshare_dashboard", { dashboardId: z.coerce.number() }, async ({ dashboardId }) => {
-  try { return formatResponse(await redashClient.unshareDashboard(dashboardId)); }
-  catch (e) { return formatError(e, `Error unsharing dashboard ${dashboardId}`); }
-});
+server.tool("unshare_dashboard", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.unshareDashboard(args.dashboardId)));
 
-// Visualization Tools
+server.tool("get_my_dashboards", { 
+  page: z.coerce.number().optional().default(1), 
+  pageSize: z.coerce.number().optional().default(25) 
+}, async (args) => wrapTool(redashClient.getMyDashboards(args.page, args.pageSize)));
+
+server.tool("get_favorite_dashboards", { 
+  page: z.coerce.number().optional().default(1), 
+  pageSize: z.coerce.number().optional().default(25) 
+}, async (args) => wrapTool(redashClient.getFavoriteDashboards(args.page, args.pageSize)));
+
+server.tool("add_dashboard_favorite", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.addDashboardFavorite(args.dashboardId)));
+
+server.tool("remove_dashboard_favorite", { dashboardId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.removeDashboardFavorite(args.dashboardId)));
+
+server.tool("get_dashboard_tags", {}, async () => wrapTool(redashClient.getDashboardTags()));
+
+// ----- 3. VISUALIZATION TOOLS -----
+
+server.tool("get_visualization", { visualizationId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getVisualization(args.visualizationId)));
+
 server.tool("create_visualization", {
   query_id: z.coerce.number(),
   type: z.string(),
   name: z.string(),
   description: z.string().optional(),
   options: z.any()
-}, async (params) => {
-  try { return formatResponse(await redashClient.createVisualization(params as CreateVisualizationRequest)); }
-  catch (e) { return formatError(e, "Error creating visualization"); }
-});
+}, async (args) => wrapTool(redashClient.createVisualization(args as CreateVisualizationRequest)));
 
 server.tool("update_visualization", {
   visualizationId: z.coerce.number(),
@@ -187,26 +204,17 @@ server.tool("update_visualization", {
   name: z.string().optional(),
   description: z.string().optional(),
   options: z.any().optional()
-}, async ({ visualizationId, ...updateData }) => {
-  try { return formatResponse(await redashClient.updateVisualization(visualizationId, updateData as UpdateVisualizationRequest)); }
-  catch (e) { return formatError(e, `Error updating visualization ${visualizationId}`); }
-});
+}, async ({ visualizationId, ...data }) => wrapTool(redashClient.updateVisualization(visualizationId, data as UpdateVisualizationRequest)));
 
-server.tool("delete_visualization", { visualizationId: z.coerce.number() }, async ({ visualizationId }) => {
-  try { await redashClient.deleteVisualization(visualizationId); return { content: [{ type: "text", text: `Visualization ${visualizationId} deleted` }] }; }
-  catch (e) { return formatError(e, `Error deleting visualization ${visualizationId}`); }
-});
+server.tool("delete_visualization", { visualizationId: z.coerce.number() }, 
+  async (args) => { await redashClient.deleteVisualization(args.visualizationId); return { content: [{ type: "text", text: "Visualization deleted successfully" }] }; });
 
-// Alert Tools
-server.tool("list_alerts", {}, async () => {
-  try { return formatResponse(await redashClient.getAlerts()); }
-  catch (e) { return formatError(e, "Error listing alerts"); }
-});
+// ----- 4. ALERT TOOLS -----
 
-server.tool("get_alert", { alertId: z.coerce.number() }, async ({ alertId }) => {
-  try { return formatResponse(await redashClient.getAlert(alertId)); }
-  catch (e) { return formatError(e, `Error getting alert ${alertId}`); }
-});
+server.tool("list_alerts", {}, async () => wrapTool(redashClient.getAlerts()));
+
+server.tool("get_alert", { alertId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getAlert(args.alertId)));
 
 server.tool("create_alert", {
   name: z.string(),
@@ -219,26 +227,42 @@ server.tool("create_alert", {
     custom_body: z.string().optional()
   }),
   rearm: z.coerce.number().nullable().optional()
-}, async (params) => {
-  try { return formatResponse(await redashClient.createAlert(params as CreateAlertRequest)); }
-  catch (e) { return formatError(e, "Error creating alert"); }
-});
+}, async (args) => wrapTool(redashClient.createAlert(args as CreateAlertRequest)));
 
-server.tool("delete_alert", { alertId: z.coerce.number() }, async ({ alertId }) => {
-  try { await redashClient.deleteAlert(alertId); return { content: [{ type: "text", text: `Alert ${alertId} deleted` }] }; }
-  catch (e) { return formatError(e, `Error deleting alert ${alertId}`); }
-});
+server.tool("update_alert", {
+  alertId: z.coerce.number(),
+  name: z.string().optional(),
+  query_id: z.coerce.number().optional(),
+  options: z.object({
+    column: z.string().optional(),
+    op: z.string().optional(),
+    value: z.union([z.coerce.number(), z.string()]).optional(),
+    custom_subject: z.string().optional(),
+    custom_body: z.string().optional()
+  }).optional(),
+  rearm: z.coerce.number().nullable().optional()
+}, async ({ alertId, ...data }) => wrapTool(redashClient.updateAlert(alertId, data as UpdateAlertRequest)));
 
-server.tool("mute_alert", { alertId: z.coerce.number() }, async ({ alertId }) => {
-  try { return formatResponse(await redashClient.muteAlert(alertId)); }
-  catch (e) { return formatError(e, `Error muting alert ${alertId}`); }
-});
+server.tool("delete_alert", { alertId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.deleteAlert(args.alertId)));
 
-// Widget Tools
-server.tool("list_widgets", {}, async () => {
-  try { return formatResponse(await redashClient.getWidgets()); }
-  catch (e) { return formatError(e, "Error listing widgets"); }
-});
+server.tool("mute_alert", { alertId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.muteAlert(args.alertId)));
+
+server.tool("get_alert_subscriptions", { alertId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getAlertSubscriptions(args.alertId)));
+
+server.tool("add_alert_subscription", {
+  alertId: z.coerce.number(),
+  destination_id: z.coerce.number().optional()
+}, async (args) => wrapTool(redashClient.addAlertSubscription(args as CreateAlertSubscriptionRequest)));
+
+// ----- 5. WIDGET TOOLS -----
+
+server.tool("list_widgets", {}, async () => wrapTool(redashClient.getWidgets()));
+
+server.tool("get_widget", { widgetId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getWidget(args.widgetId)));
 
 server.tool("create_widget", {
   dashboard_id: z.coerce.number(),
@@ -246,47 +270,66 @@ server.tool("create_widget", {
   text: z.string().optional(),
   width: z.coerce.number().optional().default(1),
   options: z.any().optional().default({})
-}, async (params) => {
-  try { return formatResponse(await redashClient.createWidget(params as CreateWidgetRequest)); }
-  catch (e) { return formatError(e, "Error creating widget"); }
-});
+}, async (args) => wrapTool(redashClient.createWidget(args as CreateWidgetRequest)));
 
-// Snippet & Destination Tools
-server.tool("list_query_snippets", {}, async () => {
-  try { return formatResponse(await redashClient.getQuerySnippets()); }
-  catch (e) { return formatError(e, "Error listing snippets"); }
-});
+server.tool("update_widget", {
+  widgetId: z.coerce.number(),
+  dashboard_id: z.coerce.number().optional(),
+  visualization_id: z.coerce.number().optional(),
+  text: z.string().optional(),
+  width: z.coerce.number().optional(),
+  options: z.any().optional()
+}, async ({ widgetId, ...data }) => wrapTool(redashClient.updateWidget(widgetId, data as UpdateWidgetRequest)));
 
-server.tool("list_destinations", {}, async () => {
-  try { return formatResponse(await redashClient.getDestinations()); }
-  catch (e) { return formatError(e, "Error listing destinations"); }
-});
+server.tool("delete_widget", { widgetId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.deleteWidget(args.widgetId)));
 
-// Schema Tool
-server.tool("get_schema", { dataSourceId: z.coerce.number() }, async ({ dataSourceId }) => {
-  try { return formatResponse(await redashClient.getSchema(dataSourceId)); }
-  catch (e) { return formatError(e, `Error getting schema for data source ${dataSourceId}`); }
-});
+// ----- 6. QUERY SNIPPET TOOLS -----
 
-// Add other tools following the same pattern...
+server.tool("list_query_snippets", {}, async () => wrapTool(redashClient.getQuerySnippets()));
+
+server.tool("get_query_snippet", { snippetId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getQuerySnippet(args.snippetId)));
+
+server.tool("create_query_snippet", {
+  trigger: z.string(),
+  description: z.string(),
+  snippet: z.string()
+}, async (args) => wrapTool(redashClient.createQuerySnippet(args as CreateQuerySnippetRequest)));
+
+server.tool("update_query_snippet", {
+  snippetId: z.coerce.number(),
+  trigger: z.string().optional(),
+  description: z.string().optional(),
+  snippet: z.string().optional()
+}, async ({ snippetId, ...data }) => wrapTool(redashClient.updateQuerySnippet(snippetId, data as UpdateQuerySnippetRequest)));
+
+server.tool("delete_query_snippet", { snippetId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.deleteQuerySnippet(args.snippetId)));
+
+// ----- 7. SYSTEM TOOLS -----
+
+server.tool("list_data_sources", {}, async () => wrapTool(redashClient.getDataSources()));
+
+server.tool("get_schema", { dataSourceId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getSchema(args.dataSourceId)));
+
+server.tool("list_destinations", {}, async () => wrapTool(redashClient.getDestinations()));
+
 
 // --- EXPRESS SERVER & SSE TRANSPORT ---
 
 const app = express();
+app.use(express.json());
+
 let transport: SSEServerTransport | null = null;
 
-/**
- * The GET endpoint Claude/Client connects to via EventSource
- */
 app.get("/sse", async (req: Request, res: Response) => {
   console.log("New SSE connection established");
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
 });
 
-/**
- * The POST endpoint where the client sends tool requests
- */
 app.post("/messages", async (req: Request, res: Response) => {
   if (transport) {
     await transport.handlePostMessage(req, res);
