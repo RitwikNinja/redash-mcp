@@ -54,23 +54,6 @@ const wrapTool = async (logic: Promise<any>) => {
     };
   }
 };
-// ------------------- FIXED TOOL (CRITICAL) -------------------
-
-// 🔥 FIX: Remove incorrect type cast causing TS2345
-server.tool(
-  "add_alert_subscription",
-  {
-    alertId: z.coerce.number(),
-    destination_id: z.coerce.number().optional()
-  },
-  async (args) =>
-    wrapTool(
-      redashClient.addAlertSubscription({
-        alert_id: args.alertId,
-        destination_id: args.destination_id
-      })
-    )
-);
 
 // ----- 1. QUERY TOOLS -----
 
