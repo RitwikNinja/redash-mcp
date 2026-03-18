@@ -3,22 +3,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express, { Request, Response } from "express";
 import { z } from "zod";
 import * as dotenv from "dotenv";
-import {
-  redashClient,
-  CreateQueryRequest,
-  UpdateQueryRequest,
-  CreateVisualizationRequest,
-  UpdateVisualizationRequest,
-  CreateDashboardRequest,
-  UpdateDashboardRequest,
-  CreateAlertRequest,
-  UpdateAlertRequest,
-  CreateWidgetRequest,
-  UpdateWidgetRequest,
-  CreateQuerySnippetRequest,
-  UpdateQuerySnippetRequest,
-  CreateAlertSubscriptionRequest
-} from "./redashClient.js";
+import { redashClient } from "./redashClient.js";
 import { logger } from "./logger.js";
 
 dotenv.config();
@@ -38,12 +23,11 @@ const server = new McpServer({
 process.stdin.resume();
 
 /**
- * Helper to ensure tool responses match MCP format
+ * Helper to ensure tool responses match MCP format and handle errors
  */
 const wrapTool = async (logic: Promise<any>) => {
   try {
     const result = await logic;
-    // Ensure we return the expected structure even if the client returns raw data
     return result?.content
       ? result
       : { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
@@ -57,25 +41,37 @@ const wrapTool = async (logic: Promise<any>) => {
 };
 
 // ------------------- TOOLS REGISTRATION -------------------
-// Note: Changed z.coerce to standard z types to ensure compatible JSON Schema for Cursor
+// Using explicit Zod schemas to ensure Cursor can parse the tool definitions correctly.
+// We use z.any() for complex nested data to avoid "Type only" errors while keeping the logic flexible.
 
 server.tool("get_query", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.getQuery(id))
 );
 
-server.tool("list_queries", { page: z.number().optional(), page_size: z.number().optional() }, (args) =>
-  wrapTool(redashClient.listQueries(args))
+server.tool("list_queries", { 
+  page: z.number().optional(), 
+  page_size: z.number().optional(),
+  q: z.string().optional()
+}, (args) =>
+  wrapTool(redashClient.getQueries(args))
 );
 
 server.tool("search_queries", { q: z.string() }, ({ q }) =>
-  wrapTool(redashClient.searchQueries(q))
+  wrapTool(redashClient.getQueries({ q }))
 );
 
-server.tool("create_query", CreateQueryRequest, (args) =>
+server.tool("create_query", { 
+  name: z.string(), 
+  query: z.string(), 
+  data_source_id: z.number(),
+  description: z.string().optional(),
+  schedule: z.any().optional(),
+  options: z.any().optional()
+}, (args) =>
   wrapTool(redashClient.createQuery(args))
 );
 
-server.tool("update_query", { id: z.number(), data: UpdateQueryRequest }, ({ id, data }) =>
+server.tool("update_query", { id: z.number(), data: z.any() }, ({ id, data }) =>
   wrapTool(redashClient.updateQuery(id, data))
 );
 
@@ -84,30 +80,25 @@ server.tool("archive_query", { id: z.number() }, ({ id }) =>
 );
 
 server.tool("get_query_results", { id: z.number() }, ({ id }) =>
-  wrapTool(redashClient.getQueryResults(id))
+  wrapTool(redashClient.getQueryResultsAsCsv(id))
 );
 
-server.tool("refresh_query", { id: z.number() }, ({ id }) =>
-  wrapTool(redashClient.refreshQuery(id))
+server.tool("get_dashboard", { id: z.number() }, ({ id }) =>
+  wrapTool(redashClient.getDashboard(id))
 );
 
-server.tool("get_job", { id: z.string() }, ({ id }) =>
-  wrapTool(redashClient.getJob(id))
+server.tool("list_dashboards", { 
+  page: z.number().optional(), 
+  page_size: z.number().optional() 
+}, (args) =>
+  wrapTool(redashClient.getDashboards(args))
 );
 
-server.tool("get_dashboard", { slug: z.string() }, ({ slug }) =>
-  wrapTool(redashClient.getDashboard(slug))
-);
-
-server.tool("list_dashboards", { page: z.number().optional(), page_size: z.number().optional() }, (args) =>
-  wrapTool(redashClient.listDashboards(args))
-);
-
-server.tool("create_dashboard", CreateDashboardRequest, (args) =>
+server.tool("create_dashboard", { name: z.string() }, (args) =>
   wrapTool(redashClient.createDashboard(args))
 );
 
-server.tool("update_dashboard", { id: z.number(), data: UpdateDashboardRequest }, ({ id, data }) =>
+server.tool("update_dashboard", { id: z.number(), data: z.any() }, ({ id, data }) =>
   wrapTool(redashClient.updateDashboard(id, data))
 );
 
@@ -119,15 +110,16 @@ server.tool("get_data_sources", {}, () =>
   wrapTool(redashClient.getDataSources())
 );
 
-server.tool("get_data_source_schema", { id: z.number() }, ({ id }) =>
-  wrapTool(redashClient.getDataSourceSchema(id))
-);
-
-server.tool("create_visualization", CreateVisualizationRequest, (args) =>
+server.tool("create_visualization", { 
+  query_id: z.number(), 
+  type: z.string(), 
+  name: z.string(), 
+  options: z.any() 
+}, (args) =>
   wrapTool(redashClient.createVisualization(args))
 );
 
-server.tool("update_visualization", { id: z.number(), data: UpdateVisualizationRequest }, ({ id, data }) =>
+server.tool("update_visualization", { id: z.number(), data: z.any() }, ({ id, data }) =>
   wrapTool(redashClient.updateVisualization(id, data))
 );
 
@@ -135,72 +127,58 @@ server.tool("delete_visualization", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.deleteVisualization(id))
 );
 
-server.tool("create_widget", CreateWidgetRequest, (args) =>
+server.tool("create_widget", { 
+  dashboard_id: z.number(), 
+  visualization_id: z.number().optional(), 
+  text: z.string().optional(), 
+  options: z.any() 
+}, (args) =>
   wrapTool(redashClient.createWidget(args))
-);
-
-server.tool("update_widget", { id: z.number(), data: UpdateWidgetRequest }, ({ id, data }) =>
-  wrapTool(redashClient.updateWidget(id, data))
 );
 
 server.tool("delete_widget", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.deleteWidget(id))
 );
 
-server.tool("list_alerts", {}, () =>
-  wrapTool(redashClient.listAlerts())
-);
-
 server.tool("get_alert", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.getAlert(id))
 );
 
-server.tool("create_alert", CreateAlertRequest, (args) =>
+server.tool("create_alert", { 
+  name: z.string(), 
+  query_id: z.number(), 
+  options: z.any(), 
+  rearm: z.number().optional() 
+}, (args) =>
   wrapTool(redashClient.createAlert(args))
-);
-
-server.tool("update_alert", { id: z.number(), data: UpdateAlertRequest }, ({ id, data }) =>
-  wrapTool(redashClient.updateAlert(id, data))
 );
 
 server.tool("delete_alert", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.deleteAlert(id))
 );
 
-server.tool("create_alert_subscription", { alert_id: z.number(), data: CreateAlertSubscriptionRequest }, ({ alert_id, data }) =>
-  wrapTool(redashClient.createAlertSubscription(alert_id, data))
-);
-
 server.tool("list_alert_subscriptions", { alert_id: z.number() }, ({ alert_id }) =>
-  wrapTool(redashClient.listAlertSubscriptions(alert_id))
-);
-
-server.tool("delete_alert_subscription", { alert_id: z.number(), subscription_id: z.number() }, ({ alert_id, subscription_id }) =>
-  wrapTool(redashClient.deleteAlertSubscription(alert_id, subscription_id))
+  wrapTool(redashClient.getAlertSubscriptions(alert_id))
 );
 
 server.tool("list_query_snippets", {}, () =>
-  wrapTool(redashClient.listQuerySnippets())
+  wrapTool(redashClient.getQuerySnippets())
 );
 
-server.tool("create_query_snippet", CreateQuerySnippetRequest, (args) =>
+server.tool("create_query_snippet", { 
+  trigger: z.string(), 
+  description: z.string(), 
+  snippet: z.string() 
+}, (args) =>
   wrapTool(redashClient.createQuerySnippet(args))
 );
 
-server.tool("update_query_snippet", { id: z.number(), data: UpdateQuerySnippetRequest }, ({ id, data }) =>
+server.tool("update_query_snippet", { id: z.number(), data: z.any() }, ({ id, data }) =>
   wrapTool(redashClient.updateQuerySnippet(id, data))
 );
 
 server.tool("delete_query_snippet", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.deleteQuerySnippet(id))
-);
-
-server.tool("get_settings", {}, () =>
-  wrapTool(redashClient.getSettings())
-);
-
-server.tool("get_session", {}, () =>
-  wrapTool(redashClient.getSession())
 );
 
 server.tool("get_destinations", {}, () =>
@@ -221,11 +199,12 @@ let currentTransport: SSEServerTransport | null = null;
 app.get("/sse", async (req: Request, res: Response) => {
   console.log("New SSE connection established");
   
-  // Initialize transport and let it handle the stream headers
+  // Transport handles stream headers automatically
   const transport = new SSEServerTransport("/messages", res);
   currentTransport = transport;
 
-  // CRITICAL: Await the connection so MCP is ready before the route logic finishes
+  // CRITICAL: Await the connection so MCP is ready before the route finishes.
+  // This allows Cursor to receive the tool list immediately.
   await server.connect(transport);
 
   req.on("close", () => {
@@ -243,7 +222,7 @@ app.post("/messages", async (req: Request, res: Response) => {
   if (currentTransport) {
     await currentTransport.handlePostMessage(req, res);
   } else {
-    res.status(400).send("No active SSE session found. Connect to /sse first.");
+    res.status(400).send("No active SSE session found.");
   }
 });
 
@@ -253,10 +232,10 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Redash MCP Server running on port ${PORT}`);
 });
 
-// Health check for hosting providers like Render
+// Health check for Render
 app.get("/", (req: Request, res: Response) => {
-  res.send("Redash MCP Server is running.");
+  res.send("Redash MCP Server is online.");
 });
 
-// Prevent process from sleeping in some environments
+// Keep process active
 setInterval(() => {}, 60000);
