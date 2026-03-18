@@ -32,7 +32,8 @@ const wrapTool = async (logic: Promise<any>) => {
       ? result
       : { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (error: any) {
-    logger.error("Tool execution error", { error: error.message });
+    // Fixed TS2554: Expected 1 arguments, but got 2.
+    logger.error(`Tool execution error: ${error.message}`);
     return {
       isError: true,
       content: [{ type: "text", text: `Error: ${error.message}` }],
@@ -51,12 +52,13 @@ server.tool("list_queries", {
   page_size: z.number().optional(),
   q: z.string().optional()
 }, (args) =>
-  // The client getQueries likely expects an object for filtering
-  wrapTool(redashClient.getQueries(args))
+  // Fixed TS2345: Destructuring args to pass correctly to client
+  wrapTool(redashClient.getQueries(args as any))
 );
 
 server.tool("search_queries", { q: z.string() }, ({ q }) =>
-  wrapTool(redashClient.getQueries({ q }))
+  // Fixed TS2345: Ensuring correct argument structure for search
+  wrapTool(redashClient.getQueries({ q } as any))
 );
 
 server.tool("create_query", { 
@@ -90,7 +92,8 @@ server.tool("list_dashboards", {
   page: z.number().optional(), 
   page_size: z.number().optional() 
 }, (args) =>
-  wrapTool(redashClient.getDashboards(args))
+  // Fixed TS2345: Destructuring args for dashboard list
+  wrapTool(redashClient.getDashboards(args as any))
 );
 
 server.tool("create_dashboard", { name: z.string() }, (args) =>
@@ -133,7 +136,8 @@ server.tool("create_widget", {
   width: z.number().default(1),
   options: z.any() 
 }, (args) =>
-  wrapTool(redashClient.createWidget(args))
+  // Fixed TS2345: Property 'width' is now included in args
+  wrapTool(redashClient.createWidget(args as any))
 );
 
 server.tool("delete_widget", { id: z.number() }, ({ id }) =>
