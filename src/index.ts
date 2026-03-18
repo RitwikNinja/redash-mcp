@@ -254,11 +254,13 @@ server.tool("add_alert_subscription", {
   alertId: z.coerce.number(),
   destination_id: z.coerce.number()
 }, async (args) => {
-  // Pass a single object containing both fields
-  return wrapTool(redashClient.addAlertSubscription({ 
-    alertId: args.alertId, 
-    destination_id: args.destination_id 
-  } as CreateAlertSubscriptionRequest));
+  // 1. Pass the number first
+  // 2. Pass the object containing the destination_id second
+  return wrapTool(
+    redashClient.addAlertSubscription(args.alertId, { 
+      destination_id: args.destination_id 
+    } as CreateAlertSubscriptionRequest)
+  );
 });
 
 // ----- 5. WIDGET TOOLS -----
