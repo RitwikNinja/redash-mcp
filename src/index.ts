@@ -189,7 +189,7 @@ server.tool("get_destinations", {}, () =>
 const app = express();
 app.use(express.json());
 
-// Track multiple active transports by session ID to prevent "stream not readable" errors
+// Track multiple active transports by session ID
 const transports = new Map<string, SSEServerTransport>();
 
 /**
@@ -199,17 +199,13 @@ app.get("/sse", async (req: Request, res: Response) => {
   const sessionId = Math.random().toString(36).substring(7);
   console.log(`New SSE connection: ${sessionId}`);
 
-  // Set headers explicitly for Render/Proxy environments
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders(); // Ensure headers are sent immediately
-
-  // Create transport with the specific message endpoint including sessionId
+  // Note: We no longer set headers manually. 
+  // SSEServerTransport.start() (called inside server.connect) does this for us.
   const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
   transports.set(sessionId, transport);
 
-  // Connect transport to MCP server
+  // Connect transport to MCP server. 
+  // This will internally call res.writeHead() with SSE headers.
   server.connect(transport).catch((error) => {
     console.error(`MCP Connection error [${sessionId}]:`, error);
   });
@@ -232,7 +228,9 @@ app.post("/messages", async (req: Request, res: Response) => {
       await transport.handlePostMessage(req, res);
     } catch (err: any) {
       console.error("Error handling post message:", err);
-      res.status(500).send(err.message);
+      if (!res.headersSent) {
+        res.status(500).send(err.message);
+      }
     }
   } else {
     console.error("Message received but no active transport found for session:", sessionId);
