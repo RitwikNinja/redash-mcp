@@ -51,7 +51,7 @@ const wrapTool = async (logic: Promise<any>) => {
   }
 };
 
-// ----- 1. QUERY TOOLS (Preserving all original logic from Attachment 1) -----
+// ----- 1. QUERY TOOLS -----
 
 server.tool("get_query", { queryId: z.coerce.number() }, 
   async (args) => wrapTool(redashClient.getQuery(args.queryId)));
@@ -252,6 +252,11 @@ server.tool("add_alert_subscription", {
 
 // ----- 5. WIDGET TOOLS -----
 
+server.tool("list_widgets", {}, async () => wrapTool(redashClient.getWidgets()));
+
+server.tool("get_widget", { widgetId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getWidget(args.widgetId)));
+
 server.tool("create_widget", {
   dashboard_id: z.coerce.number(),
   visualization_id: z.coerce.number().optional(),
@@ -260,6 +265,15 @@ server.tool("create_widget", {
   options: z.any().optional()
 }, async (args) => wrapTool(redashClient.createWidget(args as CreateWidgetRequest)));
 
+server.tool("update_widget", {
+  widgetId: z.coerce.number(),
+  dashboard_id: z.coerce.number().optional(),
+  visualization_id: z.coerce.number().optional(),
+  text: z.string().optional(),
+  width: z.coerce.number().optional(),
+  options: z.any().optional()
+}, async ({ widgetId, ...data }) => wrapTool(redashClient.updateWidget(widgetId, data as UpdateWidgetRequest)));
+
 server.tool("delete_widget", { widgetId: z.coerce.number() }, 
   async (args) => wrapTool(redashClient.deleteWidget(args.widgetId)));
 
@@ -267,11 +281,21 @@ server.tool("delete_widget", { widgetId: z.coerce.number() },
 
 server.tool("list_query_snippets", {}, async () => wrapTool(redashClient.getQuerySnippets()));
 
+server.tool("get_query_snippet", { snippetId: z.coerce.number() }, 
+  async (args) => wrapTool(redashClient.getQuerySnippet(args.snippetId)));
+
 server.tool("create_query_snippet", {
   trigger: z.string(),
   description: z.string(),
   snippet: z.string()
 }, async (args) => wrapTool(redashClient.createQuerySnippet(args as CreateQuerySnippetRequest)));
+
+server.tool("update_query_snippet", {
+  snippetId: z.coerce.number(),
+  trigger: z.string().optional(),
+  description: z.string().optional(),
+  snippet: z.string().optional()
+}, async ({ snippetId, ...data }) => wrapTool(redashClient.updateQuerySnippet(snippetId, data as UpdateQuerySnippetRequest)));
 
 server.tool("delete_query_snippet", { snippetId: z.coerce.number() }, 
   async (args) => wrapTool(redashClient.deleteQuerySnippet(args.snippetId)));
@@ -293,13 +317,14 @@ app.use(express.json());
 
 let transport: SSEServerTransport | null = null;
 
-// Critical: Render looks for a web server listening on /sse
+// The endpoint Claude/Client connects to via EventSource
 app.get("/sse", async (req: Request, res: Response) => {
-  console.log("New SSE connection established");
+  logger.info("New SSE connection established");
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
 });
 
+// The endpoint where the client sends tool execution requests
 app.post("/messages", async (req: Request, res: Response) => {
   if (transport) {
     await transport.handlePostMessage(req, res);
@@ -308,6 +333,7 @@ app.post("/messages", async (req: Request, res: Response) => {
   }
 });
 
+// Render provides the PORT environment variable
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   logger.info(`Redash MCP server running on port ${PORT} via SSE architecture`);
