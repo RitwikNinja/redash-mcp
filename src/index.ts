@@ -198,13 +198,8 @@ let latestTransport: SSEServerTransport | null = null;
 app.get("/sse", async (req: Request, res: Response) => {
   console.log("New SSE connection attempt");
 
-  // Setting headers manually to ensure the stream starts correctly on Render
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-  });
-
+  // ❗ FIXED: Removed manual res.writeHead. 
+  // SSEServerTransport.start() (called via server.connect) handles headers internally.
   const transport = new SSEServerTransport("/messages", res);
   latestTransport = transport;
 
@@ -229,6 +224,7 @@ app.post("/messages", async (req: Request, res: Response) => {
       await latestTransport.handlePostMessage(req, res);
     } catch (err: any) {
       console.error("Error handling post message:", err);
+      // Ensure we don't try to send headers twice here either
       if (!res.headersSent) {
         res.status(500).send(err.message);
       }
