@@ -16,7 +16,8 @@ import {
   CreateWidgetRequest,
   UpdateWidgetRequest,
   CreateQuerySnippetRequest,
-  UpdateQuerySnippetRequest
+  UpdateQuerySnippetRequest,
+  CreateAlertSubscriptionRequest
 } from "./redashClient.js";
 import { logger } from "./logger.js";
 
@@ -319,7 +320,8 @@ const app = express();
 app.use(express.json());
 
 // ✅ Start server IMMEDIATELY (Render requirement)
-const PORT = process.env.PORT || 3000;
+
+const PORT = Number(process.env.PORT) || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
