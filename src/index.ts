@@ -336,12 +336,23 @@ server.tool("list_destinations", {}, async () => wrapTool(redashClient.getDestin
 const app = express();
 app.use(express.json());
 
-// ✅ Health check (Render needs this)
+// ✅ Health check (Render uses this)
 app.get("/", (req: Request, res: Response) => {
   res.status(200).send("OK");
 });
 
-// ✅ Keep ALL connections (important)
+// ✅ Start server IMMEDIATELY (critical)
+const PORT = process.env.PORT || 3000;
+
+const serverInstance = app.listen(PORT, "0.0.0.0", () => {
+  logger.info(`🚀 Server running on port ${PORT}`);
+});
+
+// 🔥 VERY IMPORTANT: keep process alive
+setInterval(() => {}, 1000 * 60);
+
+// ------------------- SSE SETUP -------------------
+
 const activeTransports = new Set<SSEServerTransport>();
 
 app.get("/sse", async (req: Request, res: Response) => {
@@ -354,7 +365,10 @@ app.get("/sse", async (req: Request, res: Response) => {
   const transport = new SSEServerTransport("/messages", res);
   activeTransports.add(transport);
 
-  await server.connect(transport);
+  // ❗ DO NOT block startup — this runs only on request
+  server.connect(transport).catch((err) => {
+    logger.error("MCP connection error", err);
+  });
 
   req.on("close", () => {
     logger.info("SSE connection closed");
@@ -367,19 +381,6 @@ app.post("/messages", async (req: Request, res: Response) => {
     return res.status(400).send("No active SSE connection");
   }
 
-  // Use the latest transport
   const transport = Array.from(activeTransports).pop()!;
   await transport.handlePostMessage(req, res);
-});
-
-// ✅ CRITICAL: force Node to stay alive (Render fix)
-setInterval(() => {
-  // heartbeat (no-op)
-}, 1000 * 60);
-
-// ✅ Bind correctly
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
 });
