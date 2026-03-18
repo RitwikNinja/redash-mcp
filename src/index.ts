@@ -336,14 +336,14 @@ server.tool("list_destinations", {}, async () => wrapTool(redashClient.getDestin
 const app = express();
 app.use(express.json());
 
-// ✅ Health check (VERY IMPORTANT for Render)
+// ✅ Health check (Render needs this)
 app.get("/", (req: Request, res: Response) => {
-  res.status(200).send("Redash MCP Server is running ✅");
+  res.status(200).send("OK");
 });
 
-let transport: SSEServerTransport | null = null;
+// ✅ Keep ALL connections (important)
+const activeTransports = new Set<SSEServerTransport>();
 
-// ✅ SSE endpoint
 app.get("/sse", async (req: Request, res: Response) => {
   logger.info("SSE connection started");
 
@@ -351,36 +351,35 @@ app.get("/sse", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
-  transport = new SSEServerTransport("/messages", res);
+  const transport = new SSEServerTransport("/messages", res);
+  activeTransports.add(transport);
+
   await server.connect(transport);
 
   req.on("close", () => {
     logger.info("SSE connection closed");
-    transport = null;
+    activeTransports.delete(transport);
   });
 });
 
-// ✅ Message endpoint
 app.post("/messages", async (req: Request, res: Response) => {
-  if (!transport) {
+  if (activeTransports.size === 0) {
     return res.status(400).send("No active SSE connection");
   }
 
+  // Use the latest transport
+  const transport = Array.from(activeTransports).pop()!;
   await transport.handlePostMessage(req, res);
 });
 
-// ✅ CRITICAL: Bind to 0.0.0.0 for Render
+// ✅ CRITICAL: force Node to stay alive (Render fix)
+setInterval(() => {
+  // heartbeat (no-op)
+}, 1000 * 60);
+
+// ✅ Bind correctly
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  logger.info(`🚀 Redash MCP server running on port ${PORT}`);
-});
-
-// ✅ Prevent crash on unhandled errors
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
-});
-
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled Rejection:", err);
+  logger.info(`🚀 Server running on port ${PORT}`);
 });
