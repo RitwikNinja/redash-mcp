@@ -32,7 +32,6 @@ const wrapTool = async (logic: Promise<any>) => {
       ? result
       : { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (error: any) {
-    // Fixed TS2554: Expected 1 arguments, but got 2.
     logger.error(`Tool execution error: ${error.message}`);
     return {
       isError: true,
@@ -52,12 +51,10 @@ server.tool("list_queries", {
   page_size: z.number().optional(),
   q: z.string().optional()
 }, (args) =>
-  // Fixed TS2345: Destructuring args to pass correctly to client
   wrapTool(redashClient.getQueries(args as any))
 );
 
 server.tool("search_queries", { q: z.string() }, ({ q }) =>
-  // Fixed TS2345: Ensuring correct argument structure for search
   wrapTool(redashClient.getQueries({ q } as any))
 );
 
@@ -92,7 +89,6 @@ server.tool("list_dashboards", {
   page: z.number().optional(), 
   page_size: z.number().optional() 
 }, (args) =>
-  // Fixed TS2345: Destructuring args for dashboard list
   wrapTool(redashClient.getDashboards(args as any))
 );
 
@@ -136,7 +132,6 @@ server.tool("create_widget", {
   width: z.number().default(1),
   options: z.any() 
 }, (args) =>
-  // Fixed TS2345: Property 'width' is now included in args
   wrapTool(redashClient.createWidget(args as any))
 );
 
@@ -194,27 +189,34 @@ server.tool("get_destinations", {}, () =>
 const app = express();
 app.use(express.json());
 
-// Track the active transport for the /messages endpoint
-let currentTransport: SSEServerTransport | null = null;
+// Track multiple active transports by session ID to prevent "stream not readable" errors
+const transports = new Map<string, SSEServerTransport>();
 
 /**
  * The GET endpoint Cursor connects to via EventSource
  */
 app.get("/sse", async (req: Request, res: Response) => {
-  console.log("New SSE connection established");
-  
-  // Transport handles stream headers automatically
-  const transport = new SSEServerTransport("/messages", res);
-  currentTransport = transport;
+  const sessionId = Math.random().toString(36).substring(7);
+  console.log(`New SSE connection: ${sessionId}`);
 
-  // CRITICAL: Await the connection so MCP is ready before the route finishes.
-  await server.connect(transport);
+  // Set headers explicitly for Render/Proxy environments
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders(); // Ensure headers are sent immediately
+
+  // Create transport with the specific message endpoint including sessionId
+  const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
+  transports.set(sessionId, transport);
+
+  // Connect transport to MCP server
+  server.connect(transport).catch((error) => {
+    console.error(`MCP Connection error [${sessionId}]:`, error);
+  });
 
   req.on("close", () => {
-    console.log("SSE connection closed");
-    if (currentTransport === transport) {
-      currentTransport = null;
-    }
+    console.log(`SSE connection closed: ${sessionId}`);
+    transports.delete(sessionId);
   });
 });
 
@@ -222,9 +224,18 @@ app.get("/sse", async (req: Request, res: Response) => {
  * The POST endpoint where Cursor sends tool requests
  */
 app.post("/messages", async (req: Request, res: Response) => {
-  if (currentTransport) {
-    await currentTransport.handlePostMessage(req, res);
+  const sessionId = req.query.sessionId as string;
+  const transport = sessionId ? transports.get(sessionId) : Array.from(transports.values())[0];
+
+  if (transport) {
+    try {
+      await transport.handlePostMessage(req, res);
+    } catch (err: any) {
+      console.error("Error handling post message:", err);
+      res.status(500).send(err.message);
+    }
   } else {
+    console.error("Message received but no active transport found for session:", sessionId);
     res.status(400).send("No active SSE session found.");
   }
 });
