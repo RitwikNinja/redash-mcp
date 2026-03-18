@@ -252,10 +252,13 @@ server.tool("get_alert_subscriptions", { alertId: z.coerce.number() },
 
 server.tool("add_alert_subscription", {
   alertId: z.coerce.number(),
-  destination_id: z.coerce.number() // Removed .optional() as it's usually required for a sub
-}, async ({ alertId, destination_id }) => {
-  // Pass the ID and the data separately to match the client's expected signature
-  return wrapTool(redashClient.addAlertSubscription(alertId, destination_id));
+  destination_id: z.coerce.number()
+}, async (args) => {
+  // Pass a single object containing both fields
+  return wrapTool(redashClient.addAlertSubscription({ 
+    alertId: args.alertId, 
+    destination_id: args.destination_id 
+  } as CreateAlertSubscriptionRequest));
 });
 
 // ----- 5. WIDGET TOOLS -----
