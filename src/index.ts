@@ -2,54 +2,75 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express, { Request, Response } from "express";
 import { z } from "zod";
-import * as dotenv from 'dotenv';
-import { 
-  redashClient, 
-  CreateQueryRequest, 
-  UpdateQueryRequest, 
-  CreateVisualizationRequest, 
-  UpdateVisualizationRequest, 
-  CreateDashboardRequest, 
-  UpdateDashboardRequest, 
-  CreateAlertRequest, 
-  UpdateAlertRequest, 
-  CreateAlertSubscriptionRequest, 
-  CreateWidgetRequest, 
-  UpdateWidgetRequest, 
-  CreateQuerySnippetRequest, 
-  UpdateQuerySnippetRequest 
+import * as dotenv from "dotenv";
+import {
+  redashClient,
+  CreateQueryRequest,
+  UpdateQueryRequest,
+  CreateVisualizationRequest,
+  UpdateVisualizationRequest,
+  CreateDashboardRequest,
+  UpdateDashboardRequest,
+  CreateAlertRequest,
+  UpdateAlertRequest,
+  CreateWidgetRequest,
+  UpdateWidgetRequest,
+  CreateQuerySnippetRequest,
+  UpdateQuerySnippetRequest
 } from "./redashClient.js";
 import { logger } from "./logger.js";
 
-// Load environment variables
 dotenv.config();
 
-// Verify critical configuration
+// 🔴 Fail fast if config missing
 if (!process.env.REDASH_API_KEY) {
   console.error("REDASH_API_KEY environment variable is required");
   process.exit(1);
 }
 
-// Create modern MCP server instance for SSE compatibility
 const server = new McpServer({
   name: "redash-mcp",
-  version: "1.1.0",
+  version: "1.2.0",
 });
 
-/**
- * Standardized response wrapper to keep original logic intact
- */
+// ✅ Prevent process exit
+process.stdin.resume();
+
 const wrapTool = async (logic: Promise<any>) => {
   try {
     const result = await logic;
-    return result.content ? result : { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return result?.content
+      ? result
+      : { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (error) {
     return {
       isError: true,
-      content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }]
+      content: [
+        {
+          type: "text",
+          text: `Error: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
     };
   }
 };
+// ------------------- FIXED TOOL (CRITICAL) -------------------
+
+// 🔥 FIX: Remove incorrect type cast causing TS2345
+server.tool(
+  "add_alert_subscription",
+  {
+    alertId: z.coerce.number(),
+    destination_id: z.coerce.number().optional()
+  },
+  async (args) =>
+    wrapTool(
+      redashClient.addAlertSubscription({
+        alert_id: args.alertId,
+        destination_id: args.destination_id
+      })
+    )
+);
 
 // ----- 1. QUERY TOOLS -----
 
@@ -310,31 +331,56 @@ server.tool("get_schema", { dataSourceId: z.coerce.number() },
 server.tool("list_destinations", {}, async () => wrapTool(redashClient.getDestinations()));
 
 
-// --- EXPRESS SERVER & SSE TRANSPORT ---
+// ------------------- EXPRESS SERVER -------------------
 
 const app = express();
 app.use(express.json());
 
+// ✅ Health check (VERY IMPORTANT for Render)
+app.get("/", (req: Request, res: Response) => {
+  res.status(200).send("Redash MCP Server is running ✅");
+});
+
 let transport: SSEServerTransport | null = null;
 
-// The endpoint Claude/Client connects to via EventSource
+// ✅ SSE endpoint
 app.get("/sse", async (req: Request, res: Response) => {
-  logger.info("New SSE connection established");
+  logger.info("SSE connection started");
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
+
+  req.on("close", () => {
+    logger.info("SSE connection closed");
+    transport = null;
+  });
 });
 
-// The endpoint where the client sends tool execution requests
+// ✅ Message endpoint
 app.post("/messages", async (req: Request, res: Response) => {
-  if (transport) {
-    await transport.handlePostMessage(req, res);
-  } else {
-    res.status(400).send("No active SSE transport connection");
+  if (!transport) {
+    return res.status(400).send("No active SSE connection");
   }
+
+  await transport.handlePostMessage(req, res);
 });
 
-// Render provides the PORT environment variable
+// ✅ CRITICAL: Bind to 0.0.0.0 for Render
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  logger.info(`Redash MCP server running on port ${PORT} via SSE architecture`);
+
+app.listen(PORT, "0.0.0.0", () => {
+  logger.info(`🚀 Redash MCP server running on port ${PORT}`);
+});
+
+// ✅ Prevent crash on unhandled errors
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Rejection:", err);
 });
