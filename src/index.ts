@@ -41,8 +41,6 @@ const wrapTool = async (logic: Promise<any>) => {
 };
 
 // ------------------- TOOLS REGISTRATION -------------------
-// Using explicit Zod schemas to ensure Cursor can parse the tool definitions correctly.
-// We use z.any() for complex nested data to avoid "Type only" errors while keeping the logic flexible.
 
 server.tool("get_query", { id: z.number() }, ({ id }) =>
   wrapTool(redashClient.getQuery(id))
@@ -53,6 +51,7 @@ server.tool("list_queries", {
   page_size: z.number().optional(),
   q: z.string().optional()
 }, (args) =>
+  // The client getQueries likely expects an object for filtering
   wrapTool(redashClient.getQueries(args))
 );
 
@@ -131,6 +130,7 @@ server.tool("create_widget", {
   dashboard_id: z.number(), 
   visualization_id: z.number().optional(), 
   text: z.string().optional(), 
+  width: z.number().default(1),
   options: z.any() 
 }, (args) =>
   wrapTool(redashClient.createWidget(args))
@@ -204,7 +204,6 @@ app.get("/sse", async (req: Request, res: Response) => {
   currentTransport = transport;
 
   // CRITICAL: Await the connection so MCP is ready before the route finishes.
-  // This allows Cursor to receive the tool list immediately.
   await server.connect(transport);
 
   req.on("close", () => {
