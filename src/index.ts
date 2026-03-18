@@ -330,33 +330,32 @@ server.tool("get_schema", { dataSourceId: z.coerce.number() },
 
 server.tool("list_destinations", {}, async () => wrapTool(redashClient.getDestinations()));
 
-
-// ------------------- EXPRESS SERVER -------------------
+// ------------------- EXPRESS FIRST -------------------
 
 const app = express();
 app.use(express.json());
 
-// ✅ Health check (Render uses this)
-app.get("/", (req: Request, res: Response) => {
-  res.status(200).send("OK");
-});
-
-// ✅ Start server IMMEDIATELY (critical)
+// ✅ Start server IMMEDIATELY (Render requirement)
 const PORT = process.env.PORT || 3000;
 
-const serverInstance = app.listen(PORT, "0.0.0.0", () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
 
-// 🔥 VERY IMPORTANT: keep process alive
-setInterval(() => {}, 1000 * 60);
+// ✅ Health route (Render uses this)
+app.get("/", (req: Request, res: Response) => {
+  res.send("OK");
+});
 
-// ------------------- SSE SETUP -------------------
+// 🔥 Keep process alive (important)
+setInterval(() => {}, 60000);
+
+// ------------------- MCP (LAZY INIT ONLY) -------------------
 
 const activeTransports = new Set<SSEServerTransport>();
 
 app.get("/sse", async (req: Request, res: Response) => {
-  logger.info("SSE connection started");
+  console.log("SSE connection started");
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -365,20 +364,20 @@ app.get("/sse", async (req: Request, res: Response) => {
   const transport = new SSEServerTransport("/messages", res);
   activeTransports.add(transport);
 
-  // ❗ DO NOT block startup — this runs only on request
+  // ❗ CRITICAL: No await
   server.connect(transport).catch((err) => {
-    logger.error("MCP connection error", err);
+    console.error("MCP error:", err);
   });
 
   req.on("close", () => {
-    logger.info("SSE connection closed");
+    console.log("SSE closed");
     activeTransports.delete(transport);
   });
 });
 
 app.post("/messages", async (req: Request, res: Response) => {
   if (activeTransports.size === 0) {
-    return res.status(400).send("No active SSE connection");
+    return res.status(400).send("No SSE connection");
   }
 
   const transport = Array.from(activeTransports).pop()!;
