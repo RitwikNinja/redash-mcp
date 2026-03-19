@@ -7,6 +7,7 @@ import * as dotenv from "dotenv";
 import { redashClient } from "./redashClient.js";
 import { logger } from "./logger.js";
 import { randomUUID } from "node:crypto";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 dotenv.config();
 
@@ -400,38 +401,96 @@ server.tool("list-destinations", {}, () => wrapTool(redashClient.getDestinations
 const app = express();
 app.use(express.json());
 
-// Streamable HTTP transport (recommended for remote deployments)
-const streamableTransport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: () => randomUUID(),
-});
+// Store transports by session ID to support multiple concurrent clients.
+const transports: Record<string, StreamableHTTPServerTransport | SSEServerTransport> =
+  Object.create(null);
 
-// Legacy SSE transport (deprecated, but supported by some clients)
-let sseTransport: SSEServerTransport | null = null;
-
-// Connect server to transports once at startup.
-// Streamable HTTP is per-request under the hood, but the server still "connects" to the transport instance.
-server.connect(streamableTransport).catch((error) => {
-  logger.error(`Failed to connect Streamable HTTP transport: ${error.message}`);
-  process.exit(1);
-});
-
+// Streamable HTTP: single endpoint that supports GET/POST/DELETE.
 app.all("/mcp", async (req: any, res: any) => {
-  // Express req/res are compatible with Node IncomingMessage/ServerResponse expected by the SDK.
-  await streamableTransport.handleRequest(req, res, req.body);
+  try {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+    let transport: StreamableHTTPServerTransport | undefined;
+
+    if (sessionId) {
+      const existing = transports[sessionId];
+      if (existing instanceof StreamableHTTPServerTransport) {
+        transport = existing;
+      } else if (existing) {
+        res.status(400).json({
+          jsonrpc: "2.0",
+          error: {
+            code: -32000,
+            message:
+              "Bad Request: Session exists but uses a different transport protocol",
+          },
+          id: null,
+        });
+        return;
+      }
+    } else if (req.method === "POST" && isInitializeRequest(req.body)) {
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sid) => {
+          transports[sid] = transport!;
+        },
+      });
+
+      transport.onclose = () => {
+        const sid = transport?.sessionId;
+        if (sid) delete transports[sid];
+      };
+
+      await server.connect(transport);
+    } else {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Bad Request: No valid session ID provided" },
+        id: null,
+      });
+      return;
+    }
+
+    if (!transport) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32603, message: "Internal server error" },
+        id: null,
+      });
+      return;
+    }
+
+    await transport.handleRequest(req, res, req.body);
+  } catch (error: any) {
+    logger.error(`Error handling /mcp request: ${error?.message ?? String(error)}`);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32603, message: "Internal server error" },
+        id: null,
+      });
+    }
+  }
 });
 
+// Deprecated SSE: allow multiple sessions (one per /sse connection).
 app.get("/sse", async (req: Request, res: Response) => {
-  // Avoid noisy stdout logs; they can confuse stdio clients if this file is ever run that way.
-  sseTransport = new SSEServerTransport("/messages", res);
-  await server.connect(sseTransport);
+  const transport = new SSEServerTransport("/messages", res);
+  transports[transport.sessionId] = transport;
+  res.on("close", () => {
+    delete transports[transport.sessionId];
+  });
+  await server.connect(transport);
 });
 
 app.post("/messages", async (req: Request, res: Response) => {
-  if (sseTransport) {
-    await sseTransport.handlePostMessage(req, res);
-  } else {
-    res.status(400).send("No active SSE session found.");
+  const sessionId = (req.query.sessionId as string | undefined) ?? "";
+  const existing = transports[sessionId];
+  if (existing instanceof SSEServerTransport) {
+    await existing.handlePostMessage(req, res, req.body);
+    return;
   }
+  res.status(400).send("No transport found for sessionId");
 });
 
 const PORT = Number(process.env.PORT) || 3000;
