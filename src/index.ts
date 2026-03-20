@@ -2561,6 +2561,7 @@ async function main() {
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
     const ssePath = process.env.MCP_SSE_PATH || "/sse";
     const messagePath = process.env.MCP_MESSAGE_PATH || "/messages";
+    const streamablePath = process.env.MCP_STREAMABLE_PATH || "/mcp";
     const altMessagePath =
       messagePath === "/messages" ? "/message" : "/messages";
 
@@ -2601,10 +2602,17 @@ async function main() {
       const pathname = url.pathname;
 
       try {
-        if (req.method === "GET" && pathname.endsWith(ssePath)) {
-          let basePrefix = pathname.slice(0, pathname.length - ssePath.length);
-          if (basePrefix.endsWith("/")) basePrefix = basePrefix.slice(0, -1);
-          const messageEndpoint = `${basePrefix}${messagePath}`;
+        const isSseGetPath =
+          pathname === streamablePath || pathname.endsWith(ssePath);
+
+        if (req.method === "GET" && isSseGetPath) {
+          let messageEndpoint = pathname;
+
+          if (pathname.endsWith(ssePath)) {
+            let basePrefix = pathname.slice(0, pathname.length - ssePath.length);
+            if (basePrefix.endsWith("/")) basePrefix = basePrefix.slice(0, -1);
+            messageEndpoint = `${basePrefix}${messagePath}`;
+          }
 
           const transport = new SSEServerTransport(messageEndpoint, res);
           const sessionServer = createSessionServer();
@@ -2619,7 +2627,12 @@ async function main() {
           return;
         }
 
-        if (req.method === "POST" && (pathname.endsWith(messagePath) || pathname.endsWith(altMessagePath))) {
+        if (
+          req.method === "POST" &&
+          (pathname === streamablePath ||
+            pathname.endsWith(messagePath) ||
+            pathname.endsWith(altMessagePath))
+        ) {
           const sessionId = url.searchParams.get("sessionId");
           if (!sessionId) {
             res.statusCode = 400;
