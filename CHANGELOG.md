@@ -1,5 +1,7 @@
 # Changelog
 
+## [v0.0.11](https://github.com/RitwikNinja/redash-mcp/commits/v0.0.11) - 2026-03-20
+
 ## [v0.0.11](https://github.com/suthio/redash-mcp/compare/v0.0.10...v0.0.11) - 2026-03-09
 - Add SOCKS proxy support by @suthio in https://github.com/suthio/redash-mcp/pull/34
 - fix: use z.coerce.number() to handle string-typed numeric params from MCP clients by @strotgen in https://github.com/suthio/redash-mcp/pull/35
